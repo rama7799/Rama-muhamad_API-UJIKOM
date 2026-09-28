@@ -131,7 +131,7 @@ class AdminController extends Controller
     public function storeKategori(Request $request)
     {
         $request->validate([
-            'nama_kategori' => 'required|string|max:255|unique:kategoris,nama_kategori',
+            'nama_kategori' => 'required|string|max:255|unique:kategori,nama_kategori',
         ]);
 
         Kategori::create([
@@ -152,7 +152,7 @@ class AdminController extends Controller
         $kategori = Kategori::findOrFail($id);
 
         $request->validate([
-            'nama_kategori' => 'required|string|max:255|unique:kategoris,nama_kategori,' . $id,
+            'nama_kategori' => 'required|string|max:255|unique:kategori,nama_kategori,' . $id,
         ]);
 
         $kategori->update([
@@ -207,7 +207,7 @@ class AdminController extends Controller
     {
         $request->validate([
             'nama_alat' => 'required|string|max:255',
-            'kategori_id' => 'required|exists:kategoris,id',
+            'kategori_id' => 'required|exists:kategori,id',
             'stok' => 'required|integer|min:0',
             'status_kondisi' => 'required|string|max:100',
             'deskripsi' => 'nullable|string',
@@ -248,7 +248,7 @@ class AdminController extends Controller
 
         $request->validate([
             'nama_alat' => 'required|string|max:255',
-            'kategori_id' => 'required|exists:kategoris,id',
+            'kategori_id' => 'required|exists:kategori,id',
             'stok' => 'required|integer|min:0',
             'status_kondisi' => 'required|string|max:100',
             'deskripsi' => 'nullable|string',
@@ -440,15 +440,15 @@ class AdminController extends Controller
     }
 
     // ==========================================
-    // CRUD PENGEMBALIAN (SESUAI MODUL)
+    // CRUD PENGEMBALIAN (SESUAI MODUL) - VERSI FINAL
     // ==========================================
 
-    // 1. Menampilkan daftar pengembalian
+    // 1. Menampilkan daftar pengembalian (TIDAK BERUBAH dari kode kamu)
     public function indexPengembalian(Request $request)
     {
         $search = $request->input('search');
 
-        $pengembalians = Pengembalian::with(['peminjaman.user', 'petugas'])
+        $pengembalians = Pengembalian::with(['peminjaman.user', 'peminjaman.detailPinjams.alat', 'petugas'])
             ->when($search, function ($query, $search) {
                 return $query->where('kondisi_kembali', 'like', "%{$search}%")
                     ->orWhereHas('peminjaman.user', function ($q) use ($search) {
@@ -462,42 +462,53 @@ class AdminController extends Controller
         return view('admin.pengembalian.index', compact('pengembalians', 'search'));
     }
 
-    // 2. Menampilkan form tambah pengembalian
-    public function createPengembalian()
+    // 2. BARU: Menampilkan daftar peminjaman aktif untuk DIPILIH
+    public function pilihPengembalian()
     {
-        // Hanya ambil peminjaman yang statusnya 'dipinjam' atau 'telat' dan belum memiliki data pengembalian
-        $peminjamans = Peminjaman::with('user')
+        $peminjamans = Peminjaman::with(['user', 'detailPinjams.alat'])
             ->whereIn('status', ['dipinjam', 'telat'])
             ->whereDoesntHave('pengembalian')
             ->get();
 
-        return view('admin.pengembalian.create', compact('peminjamans'));
+        return view('admin.pengembalian.pilih', compact('peminjamans'));
     }
 
-    // 3. Menyimpan data pengembalian baru dengan denda otomatis
-    public function storePengembalian(Request $request)
+    // 3. UBAH: Form create sekarang untuk 1 peminjaman spesifik (auto-fill)
+    public function createPengembalian($peminjamanId)
+    {
+        $peminjaman = Peminjaman::with(['user', 'detailPinjams.alat'])
+            ->whereIn('status', ['dipinjam', 'telat'])
+            ->whereDoesntHave('pengembalian')
+            ->findOrFail($peminjamanId);
+
+        return view('admin.pengembalian.create', compact('peminjaman'));
+    }
+
+    // 4. UBAH: Simpan data pengembalian, tarif jadi Rp1.000/hari & status jadi dikembalikan/terlambat
+    public function storePengembalian(Request $request, $peminjamanId)
     {
         $request->validate([
-            'peminjaman_id'  => 'required|exists:peminjamans,id',
-            'tgl_kembali'    => 'required|date',
-            'kondisi_kembali'=> 'required|string|max:255',
-            'denda_tambahan' => 'nullable|integer|min:0', // Denda opsional jika ada kerusakan fisik
+            'tgl_kembali'     => 'required|date',
+            'kondisi_kembali' => 'required|string|max:255',
+            'denda_tambahan'  => 'nullable|integer|min:0', // Denda opsional jika ada kerusakan fisik
         ]);
 
         DB::beginTransaction();
         try {
-            $peminjaman = Peminjaman::with('detailPinjams.alat')->findOrFail($request->peminjaman_id);
+            $peminjaman = Peminjaman::with('detailPinjams.alat')->findOrFail($peminjamanId);
 
             // Hitung keterlambatan otomatis (dalam hari)
             $tglPlan   = \Carbon\Carbon::parse($peminjaman->tgl_kembali_plan);
             $tglAktual = \Carbon\Carbon::parse($request->tgl_kembali);
 
-            $dendaOtomatis   = 0;
-            $tarifDendaPerHari = 5000; // Contoh tarif denda: Rp 5.000 / hari keterlambatan
+            $dendaOtomatis     = 0;
+            $tarifDendaPerHari = 1000; // Rp1.000 / hari keterlambatan
+            $telat             = false;
 
             if ($tglAktual->greaterThan($tglPlan)) {
                 $selisihHari   = $tglPlan->diffInDays($tglAktual);
                 $dendaOtomatis = $selisihHari * $tarifDendaPerHari;
+                $telat         = true;
             }
 
             // Total denda = denda keterlambatan + denda tambahan (misal karena rusak)
@@ -506,15 +517,15 @@ class AdminController extends Controller
 
             // Simpan data pengembalian
             Pengembalian::create([
-                'peminjaman_id'   => $request->peminjaman_id,
+                'peminjaman_id'   => $peminjaman->id,
                 'tgl_kembali'     => $request->tgl_kembali,
                 'kondisi_kembali' => $request->kondisi_kembali,
                 'denda'           => $totalDenda,
                 'petugas_id'      => auth()->id(),
             ]);
 
-            // Ubah status peminjaman menjadi selesai
-            $peminjaman->update(['status' => 'selesai']);
+            // Ubah status peminjaman jadi dikembalikan / terlambat
+            $peminjaman->update(['status' => $telat ? 'terlambat' : 'dikembalikan']);
 
             // Kembalikan stok alat ke inventaris
             foreach ($peminjaman->detailPinjams as $detail) {
@@ -530,7 +541,7 @@ class AdminController extends Controller
         }
     }
 
-    // 4. Menghapus data pengembalian
+    // 5. Menghapus data pengembalian (TIDAK BERUBAH, cuma status reset ke 'dipinjam')
     public function destroyPengembalian($id)
     {
         $pengembalian = Pengembalian::with('peminjaman.detailPinjams.alat')->findOrFail($id);
@@ -539,7 +550,6 @@ class AdminController extends Controller
         try {
             $peminjaman = $pengembalian->peminjaman;
 
-            // Jika data pengembalian dihapus, kembalikan status peminjaman jadi 'dipinjam' dan kurangi kembali stoknya
             if ($peminjaman) {
                 $peminjaman->update(['status' => 'dipinjam']);
                 foreach ($peminjaman->detailPinjams as $detail) {
@@ -556,5 +566,14 @@ class AdminController extends Controller
             return back()->with('error', $e->getMessage());
         }
     }
+
+    // 6. Detail pengembalian (TIDAK BERUBAH)
+    public function showPengembalian($id)
+    {
+        $pengembalian = Pengembalian::with(['peminjaman.user', 'peminjaman.detailPinjams.alat', 'petugas'])
+            ->findOrFail($id);
+
+        return view('admin.pengembalian.show', compact('pengembalian'));
+    }
+
 }
-   

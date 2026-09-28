@@ -46,13 +46,17 @@ Route::middleware(['auth', 'role:admin'])->prefix('admin')->name('admin.')->grou
     Route::post('/peminjaman', [\App\Http\Controllers\WEB\AdminController::class, 'storePeminjaman'])->name('peminjaman.store');
     Route::put('/peminjaman/{id}/status', [\App\Http\Controllers\WEB\AdminController::class, 'updateStatusPeminjaman'])->name('peminjaman.updateStatus');
     Route::delete('/peminjaman/{id}', [\App\Http\Controllers\WEB\AdminController::class, 'destroyPeminjaman'])->name('peminjaman.destroy');
-
+    
     // CRUD Pengembalian
     Route::get('/pengembalian', [AdminController::class, 'indexPengembalian'])->name('pengembalian.index');
-    Route::get('/pengembalian/create', [AdminController::class, 'createPengembalian'])->name('pengembalian.create');
-    Route::post('/pengembalian', [AdminController::class, 'storePengembalian'])->name('pengembalian.store');
+    // WAJIB paling atas duluan sebelum /{id}, biar 'pilih' nggak ketangkep sebagai id
+    Route::get('/pengembalian/pilih', [AdminController::class, 'pilihPengembalian'])->name('pengembalian.pilih');
+    // create & store sekarang bawa id peminjaman
+    Route::get('/pengembalian/{peminjaman}/create', [AdminController::class, 'createPengembalian'])->name('pengembalian.create');
+    Route::post('/pengembalian/{peminjaman}', [AdminController::class, 'storePengembalian'])->name('pengembalian.store');
+    Route::get('/pengembalian/{id}', [AdminController::class, 'showPengembalian'])->name('pengembalian.show');
     Route::delete('/pengembalian/{id}', [AdminController::class, 'destroyPengembalian'])->name('pengembalian.destroy');
-   
+    
 });
 
 
@@ -84,7 +88,12 @@ Route::middleware(['auth', 'role:peminjam'])->prefix('peminjam')->name('peminjam
     Route::get('/katalog', [PeminjamController::class, 'katalogAlat'])->name('katalog');
     Route::post('/peminjaman/ajukan', [PeminjamController::class, 'ajukanPeminjaman'])->name('peminjaman.ajukan');
     Route::get('/riwayat', [PeminjamController::class, 'riwayatPeminjaman'])->name('riwayat');
+
+    // Riwayat & Pengembalian
+    Route::get('/riwayat', [PeminjamController::class, 'riwayatPeminjaman'])->name('riwayat');
+    Route::post('/pengembalian/{id}/ajukan', [PeminjamController::class, 'ajukanPengembalian'])->name('pengembalian.ajukan');
 });
+
 
 // Route Tamu (Belum login)
 Route::middleware(['guest'])->group(function () {
